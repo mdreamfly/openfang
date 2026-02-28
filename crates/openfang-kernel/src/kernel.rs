@@ -723,7 +723,14 @@ impl OpenFangKernel {
             if let Some(ref provider) = config.memory.embedding_provider {
                 // Explicit config takes priority
                 let api_key_env = config.memory.embedding_api_key_env.as_deref().unwrap_or("");
-                match create_embedding_driver(provider, "text-embedding-3-small", api_key_env) {
+                let base_url = config.memory.embedding_base_url.as_deref().or_else(|| {
+                    if provider == &config.default_model.provider {
+                        config.default_model.base_url.as_deref()
+                    } else {
+                        None
+                    }
+                });
+                match create_embedding_driver(provider, "text-embedding-3-small", api_key_env, base_url) {
                     Ok(d) => {
                         info!(provider = %provider, "Embedding driver configured from memory config");
                         Some(Arc::from(d))
@@ -733,8 +740,19 @@ impl OpenFangKernel {
                         None
                     }
                 }
-            } else if std::env::var("OPENAI_API_KEY").is_ok() {
-                match create_embedding_driver("openai", "text-embedding-3-small", "OPENAI_API_KEY")
+            } else if std::env::var("OPENAI_API_KEY").is_ok() || 
+                      (config.default_model.provider == "openai" && !config.default_model.api_key_env.is_empty() && std::env::var(&config.default_model.api_key_env).is_ok()) {
+                let base_url = if config.default_model.provider == "openai" {
+                    config.default_model.base_url.as_deref()
+                } else {
+                    None
+                };
+                let api_key_env = if config.default_model.provider == "openai" && !config.default_model.api_key_env.is_empty() {
+                    config.default_model.api_key_env.as_str()
+                } else {
+                    "OPENAI_API_KEY"
+                };
+                match create_embedding_driver("openai", "text-embedding-3-small", api_key_env, base_url)
                 {
                     Ok(d) => {
                         info!("Embedding driver auto-detected: OpenAI");
@@ -747,7 +765,7 @@ impl OpenFangKernel {
                 }
             } else {
                 // Try Ollama (local, no key needed)
-                match create_embedding_driver("ollama", "nomic-embed-text", "") {
+                match create_embedding_driver("ollama", "nomic-embed-text", "", None) {
                     Ok(d) => {
                         info!("Embedding driver auto-detected: Ollama (local)");
                         Some(Arc::from(d))
