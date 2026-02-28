@@ -26,13 +26,13 @@ fn check_taint_shell_exec(command: &str) -> Option<String> {
     // Heuristic: flag commands that look like they contain embedded external URLs
     // or base64 payloads (common injection patterns)
     let suspicious_patterns = [
-        "curl ",
-        "wget ",
         "| sh",
         "| bash",
         "base64 -d",
         "$(curl",
         "`curl",
+        "$(wget",
+        "`wget",
         "eval ",
     ];
     for pattern in &suspicious_patterns {
