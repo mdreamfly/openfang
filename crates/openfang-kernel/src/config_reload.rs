@@ -43,6 +43,8 @@ pub enum HotAction {
     ReloadFallbackProviders,
     /// Provider base URL overrides changed.
     ReloadProviderUrls,
+    /// Exec policy changed — dynamically update tool runner policy.
+    UpdateExecPolicy,
 }
 
 // ---------------------------------------------------------------------------
@@ -239,6 +241,10 @@ pub fn build_reload_plan(old: &KernelConfig, new: &KernelConfig) -> ReloadPlan {
 
     if field_changed(&old.provider_urls, &new.provider_urls) {
         plan.hot_actions.push(HotAction::ReloadProviderUrls);
+    }
+
+    if field_changed(&old.exec_policy, &new.exec_policy) {
+        plan.hot_actions.push(HotAction::UpdateExecPolicy);
     }
 
     // ----- No-op fields -----

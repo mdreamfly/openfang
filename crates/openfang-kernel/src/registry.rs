@@ -160,6 +160,17 @@ impl AgentRegistry {
         Ok(())
     }
 
+    /// Update an agent's exec policy.
+    pub fn update_exec_policy(&self, id: AgentId, exec_policy: Option<openfang_types::config::ExecPolicy>) -> OpenFangResult<()> {
+        let mut entry = self
+            .agents
+            .get_mut(&id)
+            .ok_or_else(|| OpenFangError::AgentNotFound(id.to_string()))?;
+        entry.manifest.exec_policy = exec_policy;
+        entry.last_active = chrono::Utc::now();
+        Ok(())
+    }
+
     /// Update an agent's model AND provider together.
     pub fn update_model_and_provider(
         &self,

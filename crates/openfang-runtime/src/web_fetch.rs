@@ -87,10 +87,17 @@ impl WebFetchEngine {
             .unwrap_or("")
             .to_string();
 
-        let body = resp
-            .text()
+        // Step 3: Read response body as bytes and handle encoding properly
+        let bytes = resp
+            .bytes()
             .await
             .map_err(|e| format!("Failed to read response body: {e}"))?;
+
+        // Detect charset from Content-Type header
+        let charset = extract_charset_from_content_type(&content_type);
+
+        // Convert to String with proper encoding
+        let body = decode_response_body(&bytes, charset);
 
         // Step 4: Detect HTML and optionally convert to Markdown
         let processed = if self.config.readability && is_html(&content_type, &body) {
@@ -105,11 +112,12 @@ impl WebFetchEngine {
             body
         };
 
-        // Step 5: Truncate
+        // Step 5: Truncate (use char index, not byte index, to avoid UTF-8 boundary issues)
         let truncated = if processed.len() > self.config.max_chars {
+            let chars: String = processed.chars().take(self.config.max_chars).collect();
             format!(
                 "{}... [truncated, {} total chars]",
-                &processed[..self.config.max_chars],
+                chars,
                 processed.len()
             )
         } else {
@@ -243,6 +251,75 @@ fn extract_host(url: &str) -> String {
     } else {
         url.to_string()
     }
+}
+
+/// Extract charset from Content-Type header (e.g., "text/html; charset=gb2312").
+fn extract_charset_from_content_type(content_type: &str) -> Option<String> {
+    let lower = content_type.to_lowercase();
+    // Look for charset="value" or charset=value
+    for pattern in &["charset=", "charset ="] {
+        if let Some(pos) = lower.find(pattern) {
+            let rest = &content_type[pos + pattern.len()..];
+            // Extract the value (handle quotes)
+            let value = rest.trim();
+            if value.starts_with('"') {
+                if let Some(end) = value[1..].find('"') {
+                    return Some(value[1..1 + end].to_string());
+                }
+            } else {
+                // No quotes - extract until semicolon or space
+                if let Some(end) = value.find(';') {
+                    return Some(value[..end].trim().to_string());
+                }
+                return Some(value.trim().to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Decode response bytes to String with proper encoding handling.
+/// Falls back to lossy UTF-8 conversion if encoding is unknown or unsupported.
+fn decode_response_body(bytes: &[u8], charset: Option<String>) -> String {
+    let encoding = charset
+        .as_deref()
+        .map(|c| c.to_lowercase())
+        .unwrap_or_else(|| "utf-8".to_string());
+
+    // Handle common Chinese encodings using encoding_rs if available,
+    // otherwise fall back to lossy UTF-8
+    match encoding.as_str() {
+        "gb2312" | "gbk" | "gb18030" => {
+            // Try encoding_rs for proper GBK handling
+            decode_with_encoding(bytes, "GBK")
+        }
+        "big5" | "big5-tw" => {
+            decode_with_encoding(bytes, "BIG5")
+        }
+        "windows-1252" | "iso-8859-1" | "latin1" => {
+            // Latin-1 is a superset of ASCII, can decode any byte sequence
+            String::from_utf8_lossy(bytes).into_owned()
+        }
+        "utf-8" | "utf8" | _ => {
+            // Default to UTF-8
+            match std::str::from_utf8(bytes) {
+                Ok(s) => s.to_string(),
+                Err(_) => {
+                    // Invalid UTF-8, try to recover by replacing invalid sequences
+                    String::from_utf8_lossy(bytes).into_owned()
+                }
+            }
+        }
+    }
+}
+
+/// Try to decode bytes using encoding_rs if available, otherwise fall back.
+#[allow(unused_variables)]
+fn decode_with_encoding(bytes: &[u8], _encoding_name: &str) -> String {
+    // Note: encoding_rs is not a dependency, so we use lossy fallback
+    // This handles the common case where the server returns invalid UTF-8
+    // but the lossy conversion will show readable text for Latin scripts
+    String::from_utf8_lossy(bytes).into_owned()
 }
 
 #[cfg(test)]

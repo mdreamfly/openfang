@@ -914,11 +914,9 @@ impl OpenFangKernel {
                     let mut restored_entry = entry;
                     restored_entry.state = AgentState::Running;
 
-                    // Inherit kernel exec_policy for agents that lack one
-                    if restored_entry.manifest.exec_policy.is_none() {
-                        restored_entry.manifest.exec_policy =
-                            Some(kernel.config.exec_policy.clone());
-                    }
+                    // Inherit kernel exec_policy for agents (always force update to catch changed global config)
+                    restored_entry.manifest.exec_policy =
+                        Some(kernel.config.exec_policy.clone());
                     if let Err(e) = kernel.registry.register(restored_entry) {
                         tracing::warn!(agent = %name, "Failed to restore agent: {e}");
                     } else {
@@ -975,11 +973,9 @@ impl OpenFangKernel {
             .create_session(agent_id)
             .map_err(KernelError::OpenFang)?;
 
-        // Inherit kernel exec_policy as fallback if agent manifest doesn't have one
+        // Inherit kernel exec_policy for all newly spawned agents
         let mut manifest = manifest;
-        if manifest.exec_policy.is_none() {
-            manifest.exec_policy = Some(self.config.exec_policy.clone());
-        }
+        manifest.exec_policy = Some(self.config.exec_policy.clone());
 
         // Overlay kernel default_model onto agent if no custom key/url is set.
         // This ensures agents respect the user's configured provider from `openfang init`.
@@ -2795,6 +2791,12 @@ impl OpenFangKernel {
                         .write()
                         .unwrap_or_else(|e| e.into_inner());
                     catalog.apply_url_overrides(&new_config.provider_urls);
+                }
+                HotAction::UpdateExecPolicy => {
+                    info!("Hot-reload: applying new exec_policy to all running agents");
+                    for entry in self.registry.list() {
+                        let _ = self.registry.update_exec_policy(entry.id, Some(new_config.exec_policy.clone()));
+                    }
                 }
                 _ => {
                     // Other hot actions (channels, web, browser, extensions, etc.)
