@@ -14,7 +14,9 @@ use crate::triggers::{TriggerEngine, TriggerId, TriggerPattern};
 use crate::workflow::{StepAgent, Workflow, WorkflowEngine, WorkflowId, WorkflowRunId};
 
 use openfang_memory::MemorySubstrate;
-use openfang_runtime::agent_loop::{run_agent_loop, run_agent_loop_streaming, AgentLoopResult};
+use openfang_runtime::agent_loop::{
+    run_agent_loop, run_agent_loop_streaming, strip_provider_prefix, AgentLoopResult,
+};
 use openfang_runtime::audit::AuditLog;
 use openfang_runtime::drivers;
 use openfang_runtime::kernel_handle::{self, KernelHandle};
@@ -413,12 +415,17 @@ fn append_daily_memory_log(workspace: &Path, response: &str) {
             return;
         }
     }
+<<<<<<< HEAD
     // Truncate long responses for the log (use char index, not byte index, to avoid UTF-8 boundary issues)
     let summary: String = if trimmed.len() > 500 {
         trimmed.chars().take(500).collect()
     } else {
         trimmed.to_string()
     };
+=======
+    // Truncate long responses for the log (UTF-8 safe)
+    let summary = openfang_types::truncate_str(trimmed, 500);
+>>>>>>> upstream/main
     let timestamp = chrono::Utc::now().format("%H:%M:%S").to_string();
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
@@ -486,6 +493,11 @@ impl OpenFangKernel {
     /// Boot the kernel with an explicit configuration.
     pub fn boot_with_config(mut config: KernelConfig) -> KernelResult<Self> {
         use openfang_types::config::KernelMode;
+
+        // Env var overrides — useful for Docker where config.toml is baked in.
+        if let Ok(listen) = std::env::var("OPENFANG_LISTEN") {
+            config.api_listen = listen;
+        }
 
         // Clamp configuration bounds to prevent zero-value or unbounded misconfigs
         config.clamp_bounds();
@@ -612,6 +624,9 @@ impl OpenFangKernel {
                 config.provider_urls.len()
             );
         }
+        // Load user's custom models from ~/.openfang/custom_models.json
+        let custom_models_path = config.home_dir.join("custom_models.json");
+        model_catalog.load_custom_models(&custom_models_path);
         let available_count = model_catalog.available_models().len();
         let total_count = model_catalog.list_models().len();
         let local_count = model_catalog
@@ -1433,6 +1448,16 @@ impl OpenFangKernel {
             };
             manifest.model.system_prompt =
                 openfang_runtime::prompt_builder::build_system_prompt(&prompt_ctx);
+            // Store canonical context separately for injection as user message
+            // (keeps system prompt stable across turns for provider prompt caching)
+            if let Some(cc_msg) =
+                openfang_runtime::prompt_builder::build_canonical_context_message(&prompt_ctx)
+            {
+                manifest.metadata.insert(
+                    "canonical_context_msg".to_string(),
+                    serde_json::Value::String(cc_msg),
+                );
+            }
         }
 
         let memory = Arc::clone(&self.memory);
@@ -1881,6 +1906,16 @@ impl OpenFangKernel {
             };
             manifest.model.system_prompt =
                 openfang_runtime::prompt_builder::build_system_prompt(&prompt_ctx);
+            // Store canonical context separately for injection as user message
+            // (keeps system prompt stable across turns for provider prompt caching)
+            if let Some(cc_msg) =
+                openfang_runtime::prompt_builder::build_canonical_context_message(&prompt_ctx)
+            {
+                manifest.metadata.insert(
+                    "canonical_context_msg".to_string(),
+                    serde_json::Value::String(cc_msg),
+                );
+            }
         }
 
         let is_stable = self.config.mode == openfang_types::config::KernelMode::Stable;
@@ -1901,7 +1936,7 @@ impl OpenFangKernel {
             router.resolve_aliases(&self.model_catalog.read().unwrap_or_else(|e| e.into_inner()));
             // Build a probe request to score complexity
             let probe = CompletionRequest {
-                model: manifest.model.model.clone(),
+                model: strip_provider_prefix(&manifest.model.model, &manifest.model.provider),
                 messages: vec![openfang_types::message::Message::user(message)],
                 tools: tools.clone(),
                 max_tokens: manifest.model.max_tokens,
@@ -2263,7 +2298,10 @@ impl OpenFangKernel {
                     .map(|entry| entry.provider.clone())
             });
 
-        if let Some(provider) = resolved_provider {
+        // If catalog lookup failed, try to infer provider from model name prefix
+        let provider = resolved_provider.or_else(|| infer_provider_from_model(model));
+
+        if let Some(provider) = provider {
             self.registry
                 .update_model_and_provider(agent_id, model.to_string(), provider.clone())
                 .map_err(KernelError::OpenFang)?;
@@ -2272,7 +2310,7 @@ impl OpenFangKernel {
             self.registry
                 .update_model(agent_id, model.to_string())
                 .map_err(KernelError::OpenFang)?;
-            info!(agent_id = %agent_id, model = %model, "Agent model updated");
+            info!(agent_id = %agent_id, model = %model, "Agent model updated (provider unchanged)");
         }
 
         // Persist the updated entry
@@ -3508,43 +3546,50 @@ impl OpenFangKernel {
         let primary = if agent_provider == default_provider && !has_custom_key && !has_custom_url {
             Arc::clone(&self.default_driver)
         } else {
-            // Create a dedicated driver for this agent
-            // Auth profile rotation: if profiles are configured for this provider,
-            // select the highest-priority profile's key env var.
-            let default_key_env = manifest
-                .model
-                .api_key_env
-                .as_deref()
-                .unwrap_or(&self.config.default_model.api_key_env);
-
-            let api_key_env =
+            // Create a dedicated driver for this agent.
+            //
+            // IMPORTANT: When the agent's provider differs from the default,
+            // we must NOT pass the default provider's API key. Instead, pass None
+            // so create_driver() can look up the correct env var for the target provider.
+            let api_key = if has_custom_key {
+                // Agent explicitly set an API key env var — use it
+                manifest
+                    .model
+                    .api_key_env
+                    .as_ref()
+                    .and_then(|env| std::env::var(env).ok())
+            } else if agent_provider == default_provider {
+                // Same provider — use default key
+                std::env::var(&self.config.default_model.api_key_env).ok()
+            } else {
+                // Different provider — check auth profiles first, then let
+                // create_driver() look up the correct env var automatically.
                 if let Some(profiles) = self.config.auth_profiles.get(agent_provider.as_str()) {
-                    if !profiles.is_empty() {
-                        // Pick highest-priority profile (lowest priority number)
-                        let mut sorted: Vec<_> = profiles.iter().collect();
-                        sorted.sort_by_key(|p| p.priority);
-                        let best = &sorted[0];
-                        // Use the profile's env var if the key exists, otherwise fall back
-                        if std::env::var(&best.api_key_env).is_ok() {
-                            best.api_key_env.clone()
-                        } else {
-                            default_key_env.to_string()
-                        }
-                    } else {
-                        default_key_env.to_string()
-                    }
+                    let mut sorted: Vec<_> = profiles.iter().collect();
+                    sorted.sort_by_key(|p| p.priority);
+                    sorted
+                        .first()
+                        .and_then(|best| std::env::var(&best.api_key_env).ok())
                 } else {
-                    default_key_env.to_string()
-                };
+                    // Pass None — create_driver() has per-provider env var lookups
+                    None
+                }
+            };
+
+            // Don't inherit default provider's base_url when switching providers
+            let base_url = if has_custom_url {
+                manifest.model.base_url.clone()
+            } else if agent_provider == default_provider {
+                self.config.default_model.base_url.clone()
+            } else {
+                // Let create_driver() use the target provider's default base URL
+                None
+            };
 
             let driver_config = DriverConfig {
                 provider: agent_provider.clone(),
-                api_key: std::env::var(&api_key_env).ok(),
-                base_url: manifest
-                    .model
-                    .base_url
-                    .clone()
-                    .or_else(|| self.config.default_model.base_url.clone()),
+                api_key,
+                base_url,
             };
 
             drivers::create_driver_with_proxy(&driver_config, &self.config.proxy).map_err(|e| {
@@ -3931,6 +3976,7 @@ impl OpenFangKernel {
         };
 
         // Add skill-provided tools (filtered by agent's skill allowlist)
+        let mut skill_tool_names = std::collections::HashSet::new();
         let skill_tools = {
             let registry = self
                 .skill_registry
@@ -3943,6 +3989,7 @@ impl OpenFangKernel {
             }
         };
         for skill_tool in skill_tools {
+            skill_tool_names.insert(skill_tool.name.clone());
             all_tools.push(ToolDefinition {
                 name: skill_tool.name.clone(),
                 description: skill_tool.description.clone(),
@@ -3980,10 +4027,15 @@ impl OpenFangKernel {
             return all_tools;
         }
 
+        let auto_grant_skills = self.config.skills.auto_grant;
+
         // Filter to tools the agent has capability for
         all_tools
             .into_iter()
             .filter(|tool| {
+                if auto_grant_skills && skill_tool_names.contains(&tool.name) {
+                    return true;
+                }
                 caps.iter().any(|c| match c {
                     Capability::ToolInvoke(name) => name == &tool.name || name == "*",
                     _ => false,
@@ -4246,6 +4298,62 @@ fn manifest_to_capabilities(manifest: &AgentManifest) -> Vec<Capability> {
     }
 
     caps
+}
+
+/// Infer provider from a model name when catalog lookup fails.
+///
+/// Uses well-known model name prefixes to map to the correct provider.
+/// This is a defense-in-depth fallback — models should ideally be in the catalog.
+fn infer_provider_from_model(model: &str) -> Option<String> {
+    let lower = model.to_lowercase();
+    // Check for explicit provider prefix (e.g., "minimax/MiniMax-M2.5")
+    if let Some(prefix) = lower.split('/').next() {
+        match prefix {
+            "minimax" | "gemini" | "anthropic" | "openai" | "groq" | "deepseek" | "mistral"
+            | "cohere" | "xai" | "ollama" | "together" | "fireworks" | "perplexity"
+            | "cerebras" | "sambanova" | "replicate" | "huggingface" | "ai21" | "codex"
+            | "claude-code" | "copilot" | "github-copilot" | "qwen" | "zhipu" | "moonshot"
+            | "openrouter" => {
+                if model.contains('/') {
+                    return Some(prefix.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    // Infer from well-known model name patterns
+    if lower.starts_with("minimax") {
+        Some("minimax".to_string())
+    } else if lower.starts_with("gemini") {
+        Some("gemini".to_string())
+    } else if lower.starts_with("claude") {
+        Some("anthropic".to_string())
+    } else if lower.starts_with("gpt") || lower.starts_with("o1") || lower.starts_with("o3") || lower.starts_with("o4") {
+        Some("openai".to_string())
+    } else if lower.starts_with("llama") || lower.starts_with("mixtral") || lower.starts_with("qwen") {
+        // These could be on multiple providers; don't infer
+        None
+    } else if lower.starts_with("grok") {
+        Some("xai".to_string())
+    } else if lower.starts_with("deepseek") {
+        Some("deepseek".to_string())
+    } else if lower.starts_with("mistral") || lower.starts_with("codestral") || lower.starts_with("pixtral") {
+        Some("mistral".to_string())
+    } else if lower.starts_with("command") || lower.starts_with("embed-") {
+        Some("cohere".to_string())
+    } else if lower.starts_with("jamba") {
+        Some("ai21".to_string())
+    } else if lower.starts_with("sonar") {
+        Some("perplexity".to_string())
+    } else if lower.starts_with("glm") {
+        Some("zhipu".to_string())
+    } else if lower.starts_with("ernie") {
+        Some("qianfan".to_string())
+    } else if lower.starts_with("abab") {
+        Some("minimax".to_string())
+    } else {
+        None
+    }
 }
 
 /// A well-known agent ID used for shared memory operations across agents.

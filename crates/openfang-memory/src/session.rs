@@ -428,19 +428,24 @@ impl SessionStore {
                     };
                     let text = msg.content.text_content();
                     if !text.is_empty() {
-                        // Truncate individual messages in summary to keep it compact
+                        // Truncate individual messages in summary to keep it compact (UTF-8 safe)
                         let truncated = if text.len() > 200 {
-                            format!("{}...", &text[..200])
+                            format!("{}...", openfang_types::truncate_str(&text, 200))
                         } else {
                             text
                         };
                         summary_parts.push(format!("{role}: {truncated}"));
                     }
                 }
-                // Keep summary under ~4000 chars
+                // Keep summary under ~4000 chars (UTF-8 safe)
                 let mut full_summary = summary_parts.join("\n");
                 if full_summary.len() > 4000 {
-                    full_summary = full_summary[full_summary.len() - 4000..].to_string();
+                    let start = full_summary.len() - 4000;
+                    // Find the next char boundary at or after `start`
+                    let safe_start = (start..full_summary.len())
+                        .find(|&i| full_summary.is_char_boundary(i))
+                        .unwrap_or(full_summary.len());
+                    full_summary = full_summary[safe_start..].to_string();
                 }
                 canonical.compacted_summary = Some(full_summary);
                 canonical.compaction_cursor = to_compact;

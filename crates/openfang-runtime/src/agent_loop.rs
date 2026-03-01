@@ -51,6 +51,20 @@ const MAX_CONTINUATIONS: u32 = 5;
 /// Maximum message history size before auto-trimming to prevent context overflow.
 const MAX_HISTORY_MESSAGES: usize = 20;
 
+/// Strip a provider prefix from a model ID before sending to the API.
+///
+/// Many models are stored as `provider/org/model` (e.g. `openrouter/google/gemini-2.5-flash`)
+/// but the upstream API expects just `org/model`. This also handles special routers
+/// like `openrouter/auto` → `auto`.
+pub fn strip_provider_prefix(model: &str, provider: &str) -> String {
+    let prefix = format!("{}/", provider);
+    if model.starts_with(&prefix) {
+        model[prefix.len()..].to_string()
+    } else {
+        model.to_string()
+    }
+}
+
 /// Default context window size (tokens) for token-based trimming.
 const DEFAULT_CONTEXT_WINDOW: usize = 200_000;
 
@@ -215,6 +229,19 @@ pub async fn run_agent_loop(
 
     // Validate and repair session history (drop orphans, merge consecutive)
     let mut messages = crate::session_repair::validate_and_repair(&llm_messages);
+
+    // Inject canonical context as the first user message (not in system prompt)
+    // to keep the system prompt stable across turns for provider prompt caching.
+    if let Some(cc_msg) = manifest
+        .metadata
+        .get("canonical_context_msg")
+        .and_then(|v| v.as_str())
+    {
+        if !cc_msg.is_empty() {
+            messages.insert(0, Message::user(cc_msg));
+        }
+    }
+
     let mut total_usage = TokenUsage::default();
     let final_response;
 
@@ -253,6 +280,7 @@ pub async fn run_agent_loop(
     // Build context budget from model's actual context window (or fallback to default)
     let ctx_window = context_window_tokens.unwrap_or(DEFAULT_CONTEXT_WINDOW);
     let context_budget = ContextBudget::new(ctx_window);
+    let mut any_tools_executed = false;
 
     for iteration in 0..max_iterations {
         debug!(iteration, "Agent loop iteration");
@@ -267,8 +295,11 @@ pub async fn run_agent_loop(
         // Context guard: compact oversized tool results before LLM call
         apply_context_guard(&mut messages, &context_budget, available_tools);
 
+        // Strip provider prefix: "openrouter/google/gemini-2.5-flash" → "google/gemini-2.5-flash"
+        let api_model = strip_provider_prefix(&manifest.model.model, &manifest.model.provider);
+
         let request = CompletionRequest {
-            model: manifest.model.model.clone(),
+            model: api_model,
             messages: messages.clone(),
             tools: available_tools.to_vec(),
             max_tokens: manifest.model.max_tokens,
@@ -370,7 +401,7 @@ pub async fn run_agent_loop(
                         messages_count = messages.len(),
                         "Empty response from LLM — guard activated"
                     );
-                    if iteration > 0 {
+                    if any_tools_executed {
                         "[Task completed — the agent executed tools but did not produce a text summary.]".to_string()
                     } else {
                         "[The model returned an empty response. This usually means the model is overloaded, the context is too large, or the API key lacks credits. Try again or check /status.]".to_string()
@@ -471,6 +502,7 @@ pub async fn run_agent_loop(
             StopReason::ToolUse => {
                 // Reset MaxTokens continuation counter on tool use
                 consecutive_max_tokens = 0;
+                any_tools_executed = true;
 
                 // Execute tool calls
                 let assistant_blocks = response.content.clone();
@@ -643,6 +675,22 @@ pub async fn run_agent_loop(
                         tool_use_id: result.tool_use_id,
                         content: final_content,
                         is_error: result.is_error,
+                    });
+                }
+
+                // Detect approval denials and inject guidance to prevent infinite retry loops
+                let denial_count = tool_result_blocks.iter().filter(|b| {
+                    matches!(b, ContentBlock::ToolResult { content, is_error: true, .. }
+                        if content.contains("requires human approval and was denied"))
+                }).count();
+                if denial_count > 0 {
+                    tool_result_blocks.push(ContentBlock::Text {
+                        text: format!(
+                            "[System: {} tool call(s) were denied by approval policy. \
+                             Do NOT retry denied tools. Explain to the user what you \
+                             wanted to do and that it requires their approval.]",
+                            denial_count
+                        ),
                     });
                 }
 
@@ -1075,6 +1123,19 @@ pub async fn run_agent_loop_streaming(
 
     // Validate and repair session history (drop orphans, merge consecutive)
     let mut messages = crate::session_repair::validate_and_repair(&llm_messages);
+
+    // Inject canonical context as the first user message (not in system prompt)
+    // to keep the system prompt stable across turns for provider prompt caching.
+    if let Some(cc_msg) = manifest
+        .metadata
+        .get("canonical_context_msg")
+        .and_then(|v| v.as_str())
+    {
+        if !cc_msg.is_empty() {
+            messages.insert(0, Message::user(cc_msg));
+        }
+    }
+
     let mut total_usage = TokenUsage::default();
     let final_response;
 
@@ -1111,6 +1172,7 @@ pub async fn run_agent_loop_streaming(
     // Build context budget from model's actual context window (or fallback to default)
     let ctx_window = context_window_tokens.unwrap_or(DEFAULT_CONTEXT_WINDOW);
     let context_budget = ContextBudget::new(ctx_window);
+    let mut any_tools_executed = false;
 
     for iteration in 0..max_iterations {
         debug!(iteration, "Streaming agent loop iteration");
@@ -1141,8 +1203,11 @@ pub async fn run_agent_loop_streaming(
         // Context guard: compact oversized tool results before LLM call
         apply_context_guard(&mut messages, &context_budget, available_tools);
 
+        // Strip provider prefix: "openrouter/google/gemini-2.5-flash" → "google/gemini-2.5-flash"
+        let api_model = strip_provider_prefix(&manifest.model.model, &manifest.model.provider);
+
         let request = CompletionRequest {
-            model: manifest.model.model.clone(),
+            model: api_model,
             messages: messages.clone(),
             tools: available_tools.to_vec(),
             max_tokens: manifest.model.max_tokens,
@@ -1247,7 +1312,7 @@ pub async fn run_agent_loop_streaming(
                         messages_count = messages.len(),
                         "Empty response from LLM (streaming) — guard activated"
                     );
-                    if iteration > 0 {
+                    if any_tools_executed {
                         "[Task completed — the agent executed tools but did not produce a text summary.]".to_string()
                     } else {
                         "[The model returned an empty response. This usually means the model is overloaded, the context is too large, or the API key lacks credits. Try again or check /status.]".to_string()
@@ -1347,6 +1412,7 @@ pub async fn run_agent_loop_streaming(
             StopReason::ToolUse => {
                 // Reset MaxTokens continuation counter on tool use
                 consecutive_max_tokens = 0;
+                any_tools_executed = true;
 
                 let assistant_blocks = response.content.clone();
 
@@ -1529,6 +1595,22 @@ pub async fn run_agent_loop_streaming(
                         tool_use_id: result.tool_use_id,
                         content: final_content,
                         is_error: result.is_error,
+                    });
+                }
+
+                // Detect approval denials and inject guidance to prevent infinite retry loops
+                let denial_count = tool_result_blocks.iter().filter(|b| {
+                    matches!(b, ContentBlock::ToolResult { content, is_error: true, .. }
+                        if content.contains("requires human approval and was denied"))
+                }).count();
+                if denial_count > 0 {
+                    tool_result_blocks.push(ContentBlock::Text {
+                        text: format!(
+                            "[System: {} tool call(s) were denied by approval policy. \
+                             Do NOT retry denied tools. Explain to the user what you \
+                             wanted to do and that it requires their approval.]",
+                            denial_count
+                        ),
                     });
                 }
 
@@ -2279,10 +2361,10 @@ mod tests {
         .await
         .expect("Loop should complete with fallback");
 
-        // After retry (iteration 1), should hit the iteration > 0 guard
+        // No tools were executed, so should get the empty response message
         assert!(
-            result.response.contains("Task completed"),
-            "Expected fallback after retry failure, got: {:?}",
+            result.response.contains("empty response"),
+            "Expected empty response fallback (no tools executed), got: {:?}",
             result.response
         );
     }

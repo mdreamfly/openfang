@@ -1036,6 +1036,23 @@ impl ProxyConfig {
     }
 }
 
+/// Global settings for skills installed from the plugin center.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SkillsGlobalConfig {
+    /// If true, all installed and enabled skills are automatically granted to all agents,
+    /// regardless of their `tools` or `skills` allowlist capability settings.
+    pub auto_grant: bool,
+}
+
+impl Default for SkillsGlobalConfig {
+    fn default() -> Self {
+        Self {
+            auto_grant: false,
+        }
+    }
+}
+
 /// Top-level kernel configuration.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -1113,7 +1130,7 @@ pub struct KernelConfig {
     #[serde(default)]
     pub webhook_triggers: Option<WebhookTriggerConfig>,
     /// Execution approval policy.
-    #[serde(default)]
+    #[serde(default, alias = "approval_policy")]
     pub approval: crate::approval::ApprovalPolicy,
     /// Cron scheduler max total jobs across all agents. Default: 500.
     #[serde(default = "default_max_cron_jobs")]
@@ -1167,6 +1184,9 @@ pub struct KernelConfig {
     /// Controls whether LLM API calls, Skill downloads, and Tools use a proxy.
     #[serde(default)]
     pub proxy: ProxyConfig,
+    /// Global settings for skills installed from the plugin center.
+    #[serde(default)]
+    pub skills: SkillsGlobalConfig,
 }
 
 /// OAuth client ID overrides for PKCE flows.
@@ -1335,6 +1355,7 @@ impl Default for KernelConfig {
             provider_urls: HashMap::new(),
             oauth: OAuthConfig::default(),
             proxy: ProxyConfig::default(),
+            skills: SkillsGlobalConfig::default(),
         }
     }
 }
@@ -1434,6 +1455,10 @@ impl std::fmt::Debug for KernelConfig {
                     self.proxy.enabled,
                     self.proxy.url.as_deref().unwrap_or("<none>")
                 ),
+            )
+            .field(
+                "skills",
+                &format!("auto_grant={}", self.skills.auto_grant),
             )
             .finish()
     }

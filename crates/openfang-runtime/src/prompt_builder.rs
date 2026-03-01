@@ -147,17 +147,8 @@ pub fn build_system_prompt(ctx: &PromptContext) -> String {
     // Section 11 — Operational Guidelines (always present)
     sections.push(OPERATIONAL_GUIDELINES.to_string());
 
-    // Section 12 — Canonical Context (skip for subagents)
-    if !ctx.is_subagent {
-        if let Some(ref canonical) = ctx.canonical_context {
-            if !canonical.is_empty() {
-                sections.push(format!(
-                    "## Previous Conversation Context\n{}",
-                    cap_str(canonical, 500)
-                ));
-            }
-        }
-    }
+    // Section 12 — Canonical Context moved to build_canonical_context_message()
+    // to keep the system prompt stable across turns for provider prompt caching.
 
     // Section 13 — Bootstrap Protocol (only on first-run, skip for subagents)
     if !ctx.is_subagent {
@@ -243,6 +234,21 @@ pub fn build_tools_section(granted_tools: &[String]) -> String {
         out.push_str(&descs.join(", "));
     }
     out
+}
+
+/// Build canonical context as a standalone user message (instead of system prompt).
+///
+/// This keeps the system prompt stable across turns, enabling provider prompt caching
+/// (Anthropic cache_control, etc.). The canonical context changes every turn, so
+/// injecting it in the system prompt caused 82%+ cache misses.
+pub fn build_canonical_context_message(ctx: &PromptContext) -> Option<String> {
+    if ctx.is_subagent {
+        return None;
+    }
+    ctx.canonical_context
+        .as_ref()
+        .filter(|c| !c.is_empty())
+        .map(|c| format!("[Previous conversation context]\n{}", cap_str(c, 500)))
 }
 
 /// Build the memory section (Section 4).
@@ -791,13 +797,18 @@ mod tests {
     }
 
     #[test]
-    fn test_canonical_context() {
+    fn test_canonical_context_not_in_system_prompt() {
         let mut ctx = basic_ctx();
         ctx.canonical_context =
             Some("User was discussing Rust async patterns last time.".to_string());
         let prompt = build_system_prompt(&ctx);
-        assert!(prompt.contains("## Previous Conversation Context"));
-        assert!(prompt.contains("Rust async patterns"));
+        // Canonical context should NOT be in system prompt (moved to user message)
+        assert!(!prompt.contains("## Previous Conversation Context"));
+        assert!(!prompt.contains("Rust async patterns"));
+        // But should be available via build_canonical_context_message
+        let msg = build_canonical_context_message(&ctx);
+        assert!(msg.is_some());
+        assert!(msg.unwrap().contains("Rust async patterns"));
     }
 
     #[test]
@@ -806,7 +817,9 @@ mod tests {
         ctx.is_subagent = true;
         ctx.canonical_context = Some("Previous context here.".to_string());
         let prompt = build_system_prompt(&ctx);
-        assert!(!prompt.contains("## Previous Conversation Context"));
+        assert!(!prompt.contains("Previous Conversation Context"));
+        // Should also be None from build_canonical_context_message
+        assert!(build_canonical_context_message(&ctx).is_none());
     }
 
     #[test]
