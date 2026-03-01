@@ -1,0 +1,25 @@
+﻿ Cargo.lock                                        | 259 +++++++-------
+ Cargo.toml                                        |   2 +-
+ branch.diff                                       | Bin 0 -> 49626 bytes
+ crates/openfang-api/src/routes.rs                 |   8 +-
+ crates/openfang-kernel/src/config_reload.rs       |   6 +
+ crates/openfang-kernel/src/kernel.rs              |  89 +++--
+ crates/openfang-kernel/src/registry.rs            |  11 +
+ crates/openfang-runtime/src/drivers/anthropic.rs  |  13 +-
+ crates/openfang-runtime/src/drivers/copilot.rs    |  56 ++-
+ crates/openfang-runtime/src/drivers/gemini.rs     |  13 +-
+ crates/openfang-runtime/src/drivers/mod.rs        |  33 +-
+ crates/openfang-runtime/src/drivers/openai.rs     |  13 +-
+ crates/openfang-runtime/src/embedding.rs          |  31 +-
+ crates/openfang-runtime/src/http_client.rs        | 399 ++++++++++++++++++++++
+ crates/openfang-runtime/src/lib.rs                |   1 +
+ crates/openfang-runtime/src/subprocess_sandbox.rs |   7 +
+ crates/openfang-runtime/src/tool_runner.rs        |   9 +-
+ crates/openfang-runtime/src/web_content.rs        |  10 +-
+ crates/openfang-runtime/src/web_fetch.rs          | 102 +++++-
+ crates/openfang-runtime/src/web_search.rs         |  17 +-
+ crates/openfang-skills/src/clawhub.rs             |  43 +++
+ crates/openfang-types/src/config.rs               | 159 +++++++++
+ error.log                                         |  16 +
+ openfang.toml.example                             |  27 ++
+ 24 files changed, 1131 insertions(+), 193 deletions(-)

@@ -1,0 +1,121 @@
+﻿
+              .map_err(|e| KernelError::OpenF
+ang(OpenFangError::Internal(e.to_string())))
+      }
+  
+      /// Set the weak self-reference for tri
+gger dispatch.
+      ///
+      /// Must be called once after the kerne
+l is wrapped in `Arc`.
+      pub fn set_self_handle(self: &Arc<Self>
+) {
+          let _ = self.self_handle.set(Arc::d
+owngrade(self));
+      }
+  
+      // 鈹€鈹€鈹€ Agent Binding management 鈹€鈹€
+鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹
+€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  
+      /// List all agent bindings.
+      pub fn list_bindings(&self) -> Vec<open
+fang_types::config::AgentBinding> {
+          self.bindings
+              .lock()
+              .unwrap_or_else(|e| e.into_inne
+r())
+              .clone()
+      }
+  
+      /// Add a binding at runtime.
+      pub fn add_binding(&self, binding: open
+fang_types::config::AgentBinding) {
+          let mut bindings = self.bindings.lo
+ck().unwrap_or_else(|e| e.into_inner());
+          bindings.push(binding);
+          // Sort by specificity descending
+          bindings.sort_by(|a, b| b.match_rul
+e.specificity().cmp(&a.match_rule.specificity
+()));
+      }
+  
+      /// Remove a binding by index, returns 
+the removed binding if valid.
+      pub fn remove_binding(&self, index: usi
+ze) -> Option<openfang_types::config::AgentBi
+nding> {
+          let mut bindings = self.bindings.lo
+ck().unwrap_or_else(|e| e.into_inner());
+          if index < bindings.len() {
+              Some(bindings.remove(index))
+          } else {
+              None
+          }
+      }
+  
+      /// Reload configuration: read the conf
+ig file, diff against current, and
+      /// apply hot-reloadable actions. Retur
+ns the reload plan for API response.
+>     pub fn reload_config(&self) -> Result<c
+rate::config_reload::ReloadPlan, String> {
+          use crate::config_reload::{
+              build_reload_plan, should_apply
+_hot, validate_config_for_reload,
+          };
+  
+          // Read and parse config file (usin
+g load_config to process $include directives)
+          let config_path = self.config.home_
+dir.join("config.toml");
+          let new_config = if config_path.exi
+sts() {
+              crate::config::load_config(Some
+(&config_path))
+          } else {
+              return Err("Config file not fou
+nd".to_string());
+          };
+  
+          // Validate new config
+          if let Err(errors) = validate_confi
+g_for_reload(&new_config) {
+              return Err(format!("Validation 
+failed: {}", errors.join("; ")));
+          }
+  
+          // Build the reload plan
+          let plan = build_reload_plan(&self.
+config, &new_config);
+          plan.log_summary();
+  
+          // Apply hot actions if the reload 
+mode allows it
+          if should_apply_hot(self.config.rel
+oad.mode, &plan) {
+              self.apply_hot_actions(&plan, &
+new_config);
+          }
+  
+          Ok(plan)
+      }
+  
+      /// Apply hot-reload actions to the run
+ning kernel.
+      fn apply_hot_actions(
+          &self,
+          plan: &crate::config_reload::Reload
+Plan,
+          new_config: &openfang_types::config
+::KernelConfig,
+      ) {
+          use crate::config_reload::HotAction
+;
+  
+          for action in &plan.hot_actions {
+              match action {
+                  HotAction::UpdateApprovalPo
+licy => {
+
+

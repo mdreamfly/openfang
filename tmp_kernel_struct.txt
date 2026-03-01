@@ -1,0 +1,76 @@
+﻿
+  use crate::supervisor::Supervisor;
+  use crate::triggers::{TriggerEngine, Trigge
+rId, TriggerPattern};
+  use crate::workflow::{StepAgent, Workflow, 
+WorkflowEngine, WorkflowId, WorkflowRunId};
+  
+  use openfang_memory::MemorySubstrate;
+  use openfang_runtime::agent_loop::{
+      run_agent_loop, run_agent_loop_streamin
+g, strip_provider_prefix, AgentLoopResult,
+  };
+  use openfang_runtime::audit::AuditLog;
+  use openfang_runtime::drivers;
+  use openfang_runtime::kernel_handle::{self,
+ KernelHandle};
+  use openfang_runtime::llm_driver::{Completi
+onRequest, DriverConfig, LlmDriver, StreamEve
+nt};
+  use openfang_runtime::python_runtime::{self
+, PythonConfig};
+  use openfang_runtime::routing::ModelRouter;
+  use openfang_runtime::sandbox::{SandboxConf
+ig, WasmSandbox};
+  use openfang_runtime::tool_runner::builtin_
+tool_definitions;
+  use openfang_types::agent::*;
+  use openfang_types::capability::Capability;
+  use openfang_types::config::KernelConfig;
+  use openfang_types::error::OpenFangError;
+  use openfang_types::event::*;
+  use openfang_types::memory::Memory;
+  use openfang_types::tool::ToolDefinition;
+  
+  use async_trait::async_trait;
+  use std::path::{Path, PathBuf};
+  use std::sync::{Arc, OnceLock, Weak};
+  use tracing::{debug, info, warn};
+  
+  /// The main OpenFang kernel 鈥?coordinates 
+all subsystems.
+> pub struct OpenFangKernel {
+      /// Kernel configuration.
+      pub config: KernelConfig,
+      /// Agent registry.
+      pub registry: AgentRegistry,
+      /// Capability manager.
+      pub capabilities: CapabilityManager,
+      /// Event bus.
+      pub event_bus: EventBus,
+      /// Agent scheduler.
+      pub scheduler: AgentScheduler,
+      /// Memory substrate.
+      pub memory: Arc<MemorySubstrate>,
+      /// Process supervisor.
+      pub supervisor: Supervisor,
+      /// Workflow engine.
+      pub workflows: WorkflowEngine,
+      /// Event-driven trigger engine.
+      pub triggers: TriggerEngine,
+      /// Background agent executor.
+      pub background: BackgroundExecutor,
+      /// Merkle hash chain audit trail.
+      pub audit_log: Arc<AuditLog>,
+      /// Cost metering engine.
+      pub metering: Arc<MeteringEngine>,
+      /// Default LLM driver (from kernel con
+fig).
+      default_driver: Arc<dyn LlmDriver>,
+      /// WASM sandbox engine (shared across 
+all WASM agent executions).
+      wasm_sandbox: WasmSandbox,
+      /// RBAC authentication manager.
+      pub auth: AuthManager,
+
+

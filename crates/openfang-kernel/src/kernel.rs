@@ -415,17 +415,8 @@ fn append_daily_memory_log(workspace: &Path, response: &str) {
             return;
         }
     }
-<<<<<<< HEAD
-    // Truncate long responses for the log (use char index, not byte index, to avoid UTF-8 boundary issues)
-    let summary: String = if trimmed.len() > 500 {
-        trimmed.chars().take(500).collect()
-    } else {
-        trimmed.to_string()
-    };
-=======
     // Truncate long responses for the log (UTF-8 safe)
     let summary = openfang_types::truncate_str(trimmed, 500);
->>>>>>> upstream/main
     let timestamp = chrono::Utc::now().format("%H:%M:%S").to_string();
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
@@ -4027,15 +4018,20 @@ impl OpenFangKernel {
             return all_tools;
         }
 
-        let auto_grant_skills = self.config.skills.auto_grant;
-
-        // Filter to tools the agent has capability for
+        // Filter to tools the agent has capability for.
+        // Skill-provided tools (tracked in skill_tool_names) bypass the ToolInvoke
+        // capability check — their access is already controlled by the skill allowlist
+        // (empty = all skills allowed, non-empty = only listed skills).
+        // This mirrors how MCP tools are handled: added unconditionally to all_tools
+        // without needing an explicit ToolInvoke capability grant.
         all_tools
             .into_iter()
             .filter(|tool| {
-                if auto_grant_skills && skill_tool_names.contains(&tool.name) {
+                // Skill tools: allowlist already enforced above, always pass here
+                if skill_tool_names.contains(&tool.name) {
                     return true;
                 }
+                // Built-in / MCP tools: require explicit capability
                 caps.iter().any(|c| match c {
                     Capability::ToolInvoke(name) => name == &tool.name || name == "*",
                     _ => false,

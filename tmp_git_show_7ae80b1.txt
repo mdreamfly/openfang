@@ -1,0 +1,1017 @@
+﻿commit 7ae80b1b9f157f208881bdb493a3697e59bdb8a0
+Author: jaberjaber23 <jaberib647@gmail.com>
+Date:   Sun Mar 1 04:16:17 2026 +0300
+
+    batch fixes
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 5c9c7cb..2e2f396 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -3866,7 +3866,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "openfang-api"
+-version = "0.2.1"
++version = "0.2.3"
+ dependencies = [
+  "async-trait",
+  "axum",
+@@ -3902,7 +3902,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "openfang-channels"
+-version = "0.2.1"
++version = "0.2.3"
+ dependencies = [
+  "async-trait",
+  "axum",
+@@ -3933,7 +3933,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "openfang-cli"
+-version = "0.2.1"
++version = "0.2.3"
+ dependencies = [
+  "clap",
+  "clap_complete",
+@@ -3960,7 +3960,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "openfang-desktop"
+-version = "0.2.1"
++version = "0.2.3"
+ dependencies = [
+  "axum",
+  "open",
+@@ -3986,7 +3986,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "openfang-extensions"
+-version = "0.2.1"
++version = "0.2.3"
+ dependencies = [
+  "aes-gcm",
+  "argon2",
+@@ -4014,7 +4014,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "openfang-hands"
+-version = "0.2.1"
++version = "0.2.3"
+ dependencies = [
+  "chrono",
+  "dashmap",
+@@ -4031,7 +4031,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "openfang-kernel"
+-version = "0.2.1"
++version = "0.2.3"
+ dependencies = [
+  "async-trait",
+  "chrono",
+@@ -4067,7 +4067,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "openfang-memory"
+-version = "0.2.1"
++version = "0.2.3"
+ dependencies = [
+  "async-trait",
+  "chrono",
+@@ -4086,7 +4086,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "openfang-migrate"
+-version = "0.2.1"
++version = "0.2.3"
+ dependencies = [
+  "chrono",
+  "dirs 6.0.0",
+@@ -4105,7 +4105,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "openfang-runtime"
+-version = "0.2.1"
++version = "0.2.3"
+ dependencies = [
+  "anyhow",
+  "async-trait",
+@@ -4136,7 +4136,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "openfang-skills"
+-version = "0.2.1"
++version = "0.2.3"
+ dependencies = [
+  "chrono",
+  "hex",
+@@ -4158,7 +4158,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "openfang-types"
+-version = "0.2.1"
++version = "0.2.3"
+ dependencies = [
+  "async-trait",
+  "chrono",
+@@ -4177,7 +4177,7 @@ dependencies = [
+ 
+ [[package]]
+ name = "openfang-wire"
+-version = "0.2.1"
++version = "0.2.3"
+ dependencies = [
+  "async-trait",
+  "chrono",
+@@ -8789,7 +8789,7 @@ checksum = "b9cc00251562a284751c9973bace760d86c0276c471b4be569fe6b068ee97a56"
+ 
+ [[package]]
+ name = "xtask"
+-version = "0.2.1"
++version = "0.2.3"
+ 
+ [[package]]
+ name = "yoke"
+diff --git a/Cargo.toml b/Cargo.toml
+index 1aafa41..d5633b3 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -18,7 +18,7 @@ members = [
+ ]
+ 
+ [workspace.package]
+-version = "0.2.2"
++version = "0.2.3"
+ edition = "2021"
+ license = "Apache-2.0 OR MIT"
+ repository = "https://github.com/RightNow-AI/openfang"
+diff --git a/crates/openfang-api/src/middleware.rs b/crates/openfang-api/src/middleware.rs
+index e5c454a..fee47b2 100644
+--- a/crates/openfang-api/src/middleware.rs
++++ b/crates/openfang-api/src/middleware.rs
+@@ -108,6 +108,8 @@ pub async fn auth(
+         || path == "/api/integrations"
+         || path == "/api/integrations/available"
+         || path == "/api/integrations/health"
++        || path == "/api/workflows"
++        || path == "/api/logs/stream"
+         || path.starts_with("/api/cron/")
+         || path.starts_with("/api/providers/github-copilot/oauth/")
+     {
+diff --git a/crates/openfang-api/src/routes.rs b/crates/openfang-api/src/routes.rs
+index 49e75ed..8a66493 100644
+--- a/crates/openfang-api/src/routes.rs
++++ b/crates/openfang-api/src/routes.rs
+@@ -4884,6 +4884,134 @@ pub async fn list_providers(State(state): State<Arc<AppState>>) -> impl IntoResp
+     )
+ }
+ 
++/// POST /api/models/custom 鈥?Add a custom model to the catalog.
++///
++/// Persists to `~/.openfang/custom_models.json` and makes the model immediately
++/// available for agent assignment.
++pub async fn add_custom_model(
++    State(state): State<Arc<AppState>>,
++    Json(body): Json<serde_json::Value>,
++) -> impl IntoResponse {
++    let id = body
++        .get("id")
++        .and_then(|v| v.as_str())
++        .unwrap_or("")
++        .to_string();
++    let provider = body
++        .get("provider")
++        .and_then(|v| v.as_str())
++        .unwrap_or("openrouter")
++        .to_string();
++    let context_window = body
++        .get("context_window")
++        .and_then(|v| v.as_u64())
++        .unwrap_or(128_000);
++    let max_output = body
++        .get("max_output_tokens")
++        .and_then(|v| v.as_u64())
++        .unwrap_or(8_192);
++
++    if id.is_empty() {
++        return (
++            StatusCode::BAD_REQUEST,
++            Json(serde_json::json!({"error": "Missing required field: id"})),
++        );
++    }
++
++    let display = body
++        .get("display_name")
++        .and_then(|v| v.as_str())
++        .unwrap_or(&id)
++        .to_string();
++
++    let entry = openfang_types::model_catalog::ModelCatalogEntry {
++        id: id.clone(),
++        display_name: display,
++        provider: provider.clone(),
++        tier: openfang_types::model_catalog::ModelTier::Custom,
++        context_window,
++        max_output_tokens: max_output,
++        input_cost_per_m: body
++            .get("input_cost_per_m")
++            .and_then(|v| v.as_f64())
++            .unwrap_or(0.0),
++        output_cost_per_m: body
++            .get("output_cost_per_m")
++            .and_then(|v| v.as_f64())
++            .unwrap_or(0.0),
++        supports_tools: body
++            .get("supports_tools")
++            .and_then(|v| v.as_bool())
++            .unwrap_or(true),
++        supports_vision: body
++            .get("supports_vision")
++            .and_then(|v| v.as_bool())
++            .unwrap_or(false),
++        supports_streaming: body
++            .get("supports_streaming")
++            .and_then(|v| v.as_bool())
++            .unwrap_or(true),
++        aliases: vec![],
++    };
++
++    let mut catalog = state
++        .kernel
++        .model_catalog
++        .write()
++        .unwrap_or_else(|e| e.into_inner());
++
++    if !catalog.add_custom_model(entry) {
++        return (
++            StatusCode::CONFLICT,
++            Json(serde_json::json!({"error": format!("Model '{}' already exists", id)})),
++        );
++    }
++
++    // Persist to disk
++    let custom_path = state.kernel.config.home_dir.join("custom_models.json");
++    if let Err(e) = catalog.save_custom_models(&custom_path) {
++        tracing::warn!("Failed to persist custom models: {e}");
++    }
++
++    (
++        StatusCode::CREATED,
++        Json(serde_json::json!({
++            "id": id,
++            "provider": provider,
++            "status": "added"
++        })),
++    )
++}
++
++/// DELETE /api/models/custom/{id} 鈥?Remove a custom model.
++pub async fn remove_custom_model(
++    State(state): State<Arc<AppState>>,
++    axum::extract::Path(model_id): axum::extract::Path<String>,
++) -> impl IntoResponse {
++    let mut catalog = state
++        .kernel
++        .model_catalog
++        .write()
++        .unwrap_or_else(|e| e.into_inner());
++
++    if !catalog.remove_custom_model(&model_id) {
++        return (
++            StatusCode::NOT_FOUND,
++            Json(serde_json::json!({"error": format!("Custom model '{}' not found", model_id)})),
++        );
++    }
++
++    let custom_path = state.kernel.config.home_dir.join("custom_models.json");
++    if let Err(e) = catalog.save_custom_models(&custom_path) {
++        tracing::warn!("Failed to persist custom models: {e}");
++    }
++
++    (
++        StatusCode::OK,
++        Json(serde_json::json!({"status": "removed"})),
++    )
++}
++
+ // 鈹€鈹€ A2A (Agent-to-Agent) Protocol Endpoints 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+ 
+ /// GET /.well-known/agent.json 鈥?A2A Agent Card for the default agent.
+diff --git a/crates/openfang-api/src/server.rs b/crates/openfang-api/src/server.rs
+index 0298cd5..f4adf18 100644
+--- a/crates/openfang-api/src/server.rs
++++ b/crates/openfang-api/src/server.rs
+@@ -450,6 +450,14 @@ pub async fn build_router(
+             "/api/models/aliases",
+             axum::routing::get(routes::list_aliases),
+         )
++        .route(
++            "/api/models/custom",
++            axum::routing::post(routes::add_custom_model),
++        )
++        .route(
++            "/api/models/custom/{*id}",
++            axum::routing::delete(routes::remove_custom_model),
++        )
+         .route("/api/models/{*id}", axum::routing::get(routes::get_model))
+         .route("/api/providers", axum::routing::get(routes::list_providers))
+         // Copilot OAuth (must be before parametric {name} routes)
+diff --git a/crates/openfang-api/static/index_body.html b/crates/openfang-api/static/index_body.html
+index 0443bd0..190657d 100644
+--- a/crates/openfang-api/static/index_body.html
++++ b/crates/openfang-api/static/index_body.html
+@@ -2958,6 +2958,31 @@ args = ["-y", "@modelcontextprotocol/server-filesystem", "/path"]</pre>
+                   <option :value="t" x-text="t"></option>
+                 </template>
+               </select>
++              <button class="btn btn-primary btn-sm" @click="showCustomModelForm = !showCustomModelForm" x-text="showCustomModelForm ? 'Cancel' : '+ Custom Model'"></button>
++            </div>
++            <!-- Custom model form -->
++            <div x-show="showCustomModelForm" class="info-card mb-4" style="border:1px solid var(--accent,#7c3aed)">
++              <h4 style="margin-top:0">Add Custom Model</h4>
++              <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem">
++                <div>
++                  <label class="text-xs text-dim">Model ID (required)</label>
++                  <input class="form-input" x-model="customModelId" placeholder="e.g. my-org/my-model">
++                </div>
++                <div>
++                  <label class="text-xs text-dim">Provider</label>
++                  <input class="form-input" x-model="customModelProvider" placeholder="openrouter">
++                </div>
++                <div>
++                  <label class="text-xs text-dim">Context Window</label>
++                  <input class="form-input" type="number" x-model.number="customModelContext" placeholder="128000">
++                </div>
++                <div>
++                  <label class="text-xs text-dim">Max Output Tokens</label>
++                  <input class="form-input" type="number" x-model.number="customModelMaxOutput" placeholder="8192">
++                </div>
++              </div>
++              <button class="btn btn-primary btn-sm mt-2" @click="addCustomModel()" :disabled="!customModelId.trim()">Add Model</button>
++              <span class="text-xs text-dim ml-2" x-text="customModelStatus"></span>
+             </div>
+             <div class="text-xs text-dim mb-2" x-text="filteredModels.length + ' of ' + models.length + ' models'"></div>
+             <div class="table-wrap" x-show="filteredModels.length">
+diff --git a/crates/openfang-api/static/js/app.js b/crates/openfang-api/static/js/app.js
+index 987c13e..a9d803b 100644
+--- a/crates/openfang-api/static/js/app.js
++++ b/crates/openfang-api/static/js/app.js
+@@ -155,10 +155,19 @@ document.addEventListener('alpine:init', function() {
+ 
+     async checkAuth() {
+       try {
+-        await OpenFangAPI.get('/api/providers');
++        // Use a protected endpoint (not in the public allowlist) to detect
++        // whether the server requires an API key.
++        await OpenFangAPI.get('/api/tools');
+         this.showAuthPrompt = false;
+       } catch(e) {
+-        if (e.message && (e.message.indexOf('Not authorized') >= 0 || e.message.indexOf('401') >= 0 || e.message.indexOf('Missing Authorization') >= 0)) {
++        if (e.message && (e.message.indexOf('Not authorized') >= 0 || e.message.indexOf('401') >= 0 || e.message.indexOf('Missing Authorization') >= 0 || e.message.indexOf('Unauthorized') >= 0)) {
++          // Only show prompt if we don't already have a saved key
++          var saved = localStorage.getItem('openfang-api-key');
++          if (saved) {
++            // Saved key might be stale 鈥?clear it and show prompt
++            OpenFangAPI.setAuthToken('');
++            localStorage.removeItem('openfang-api-key');
++          }
+           this.showAuthPrompt = true;
+         }
+       }
+diff --git a/crates/openfang-api/static/js/pages/settings.js b/crates/openfang-api/static/js/pages/settings.js
+index c676d1f..6f4ed8e 100644
+--- a/crates/openfang-api/static/js/pages/settings.js
++++ b/crates/openfang-api/static/js/pages/settings.js
+@@ -14,6 +14,12 @@ function settingsPage() {
+     modelSearch: '',
+     modelProviderFilter: '',
+     modelTierFilter: '',
++    showCustomModelForm: false,
++    customModelId: '',
++    customModelProvider: 'openrouter',
++    customModelContext: 128000,
++    customModelMaxOutput: 8192,
++    customModelStatus: '',
+     providerKeyInputs: {},
+     providerUrlInputs: {},
+     providerUrlSaving: {},
+@@ -227,6 +233,26 @@ function settingsPage() {
+       } catch(e) { this.models = []; }
+     },
+ 
++    async addCustomModel() {
++      var id = this.customModelId.trim();
++      if (!id) return;
++      this.customModelStatus = 'Adding...';
++      try {
++        await OpenFangAPI.post('/api/models/custom', {
++          id: id,
++          provider: this.customModelProvider || 'openrouter',
++          context_window: this.customModelContext || 128000,
++          max_output_tokens: this.customModelMaxOutput || 8192,
++        });
++        this.customModelStatus = 'Added!';
++        this.customModelId = '';
++        this.showCustomModelForm = false;
++        await this.loadModels();
++      } catch(e) {
++        this.customModelStatus = 'Error: ' + (e.message || 'Failed');
++      }
++    },
++
+     async loadConfigSchema() {
+       try {
+         var results = await Promise.all([
+diff --git a/crates/openfang-cli/src/main.rs b/crates/openfang-cli/src/main.rs
+index df8f7cb..453fe91 100644
+--- a/crates/openfang-cli/src/main.rs
++++ b/crates/openfang-cli/src/main.rs
+@@ -1248,6 +1248,7 @@ fn write_config_if_missing(
+             r#"# OpenFang Agent OS configuration
+ # See https://github.com/RightNow-AI/openfang for documentation
+ 
++# For Docker, change to "0.0.0.0:4200" or set OPENFANG_LISTEN env var.
+ api_listen = "127.0.0.1:4200"
+ 
+ [default_model]
+@@ -1913,6 +1914,7 @@ fn cmd_doctor(json: bool, repair: bool) {
+                 let default_config = r#"# OpenFang Agent OS configuration
+ # See https://github.com/RightNow-AI/openfang for documentation
+ 
++# For Docker, change to "0.0.0.0:4200" or set OPENFANG_LISTEN env var.
+ api_listen = "127.0.0.1:4200"
+ 
+ [default_model]
+diff --git a/crates/openfang-cli/src/tui/screens/init_wizard.rs b/crates/openfang-cli/src/tui/screens/init_wizard.rs
+index 3462ab7..3f15ca6 100644
+--- a/crates/openfang-cli/src/tui/screens/init_wizard.rs
++++ b/crates/openfang-cli/src/tui/screens/init_wizard.rs
+@@ -408,7 +408,7 @@ impl State {
+ 
+         for m in &models {
+             match m.tier {
+-                ModelTier::Fast | ModelTier::Local => {
++                ModelTier::Fast | ModelTier::Local | ModelTier::Custom => {
+                     if fast.is_none() {
+                         fast = Some(&m.id);
+                     }
+@@ -461,6 +461,7 @@ fn tier_label(tier: ModelTier) -> &'static str {
+         ModelTier::Balanced => "balanced",
+         ModelTier::Fast => "fast",
+         ModelTier::Local => "local",
++        ModelTier::Custom => "custom",
+     }
+ }
+ 
+diff --git a/crates/openfang-kernel/src/approval.rs b/crates/openfang-kernel/src/approval.rs
+index f5ab4d7..8b270eb 100644
+--- a/crates/openfang-kernel/src/approval.rs
++++ b/crates/openfang-kernel/src/approval.rs
+@@ -181,6 +181,7 @@ mod tests {
+             require_approval: vec!["file_write".to_string(), "file_delete".to_string()],
+             timeout_secs: 30,
+             auto_approve_autonomous: false,
++            auto_approve: false,
+         };
+         let mgr = ApprovalManager::new(policy);
+         assert!(mgr.requires_approval("file_write"));
+@@ -258,6 +259,7 @@ mod tests {
+             require_approval: vec!["file_write".to_string()],
+             timeout_secs: 120,
+             auto_approve_autonomous: true,
++            auto_approve: false,
+         };
+         mgr.update_policy(new_policy);
+ 
+diff --git a/crates/openfang-kernel/src/cron.rs b/crates/openfang-kernel/src/cron.rs
+index a879e66..d304190 100644
+--- a/crates/openfang-kernel/src/cron.rs
++++ b/crates/openfang-kernel/src/cron.rs
+@@ -234,9 +234,9 @@ impl CronScheduler {
+             if meta.job.enabled && meta.job.next_run.map(|t| t <= now).unwrap_or(false) {
+                 due.push(meta.job.clone());
+                 // Pre-advance next_run so the job won't fire again on the next
+-                // tick while it's still executing. record_success/record_failure
+-                // will recompute it again after execution completes.
+-                meta.job.next_run = Some(compute_next_run(&meta.job.schedule));
++                // tick while it's still executing. Use `now` as the base so the
++                // next fire time is computed strictly after the current moment.
++                meta.job.next_run = Some(compute_next_run_after(&meta.job.schedule, now));
+             }
+         }
+         due
+@@ -287,7 +287,8 @@ impl CronScheduler {
+                 );
+                 meta.job.enabled = false;
+             } else {
+-                meta.job.next_run = Some(compute_next_run(&meta.job.schedule));
++                meta.job.next_run =
++                    Some(compute_next_run_after(&meta.job.schedule, Utc::now()));
+             }
+         }
+     }
+@@ -297,7 +298,7 @@ impl CronScheduler {
+ // compute_next_run
+ // ---------------------------------------------------------------------------
+ 
+-/// Compute the next fire time for a schedule.
++/// Compute the next fire time for a schedule, based on `now`.
+ ///
+ /// - `At { at }` 鈥?returns `at` directly.
+ /// - `Every { every_secs }` 鈥?returns `now + every_secs`.
+@@ -306,9 +307,23 @@ impl CronScheduler {
+ ///   6-field (`sec min hour dom month dow`) formats by converting to the
+ ///   7-field format required by the `cron` crate.
+ pub fn compute_next_run(schedule: &CronSchedule) -> chrono::DateTime<Utc> {
++    compute_next_run_after(schedule, Utc::now())
++}
++
++/// Compute the next fire time for a schedule, strictly after `after`.
++///
++/// Uses `after + 1 second` as the base time so the `cron` crate's
++/// inclusive `.after()` always returns a strictly future time. Without
++/// this offset, calling `compute_next_run` right after a job fires can
++/// return the same minute (or even the same second), causing the
++/// scheduler to re-fire immediately.
++pub fn compute_next_run_after(
++    schedule: &CronSchedule,
++    after: chrono::DateTime<Utc>,
++) -> chrono::DateTime<Utc> {
+     match schedule {
+         CronSchedule::At { at } => *at,
+-        CronSchedule::Every { every_secs } => Utc::now() + Duration::seconds(*every_secs as i64),
++        CronSchedule::Every { every_secs } => after + Duration::seconds(*every_secs as i64),
+         CronSchedule::Cron { expr, tz: _ } => {
+             // Convert standard 5/6-field cron to 7-field for the `cron` crate.
+             // Standard 5-field: min hour dom month dow
+@@ -322,14 +337,17 @@ pub fn compute_next_run(schedule: &CronSchedule) -> chrono::DateTime<Utc> {
+                 _ => expr.clone(),
+             };
+ 
++            // Add 1 second so `.after()` (inclusive) skips the current second.
++            let base = after + Duration::seconds(1);
++
+             match seven_field.parse::<cron::Schedule>() {
+                 Ok(sched) => sched
+-                    .after(&Utc::now())
++                    .after(&base)
+                     .next()
+-                    .unwrap_or_else(|| Utc::now() + Duration::hours(1)),
++                    .unwrap_or_else(|| after + Duration::hours(1)),
+                 Err(e) => {
+                     warn!("Failed to parse cron expression '{}': {}", expr, e);
+-                    Utc::now() + Duration::hours(1)
++                    after + Duration::hours(1)
+                 }
+             }
+         }
+@@ -729,6 +747,27 @@ mod tests {
+ 
+     // -- error message truncation in record_failure -------------------------
+ 
++    #[test]
++    fn test_compute_next_run_after_skips_current_second() {
++        // A "every 4 hours" cron: next_run should be >= 4 hours from now,
++        // not in the same minute (the bug from #55).
++        let schedule = CronSchedule::Cron {
++            expr: "0 */4 * * *".into(),
++            tz: None,
++        };
++        let now = Utc::now();
++        let next = compute_next_run_after(&schedule, now);
++        // Must be strictly after `now` and at least ~1 hour away
++        // (the closest 4-hourly boundary is at least minutes away).
++        assert!(next > now, "next_run should be strictly after now");
++        let diff = next - now;
++        assert!(
++            diff.num_minutes() >= 1,
++            "Expected next_run at least 1 min away, got {} seconds",
++            diff.num_seconds()
++        );
++    }
++
+     #[test]
+     fn test_record_failure_truncates_long_error() {
+         let (sched, _tmp) = make_scheduler(100);
+diff --git a/crates/openfang-kernel/src/kernel.rs b/crates/openfang-kernel/src/kernel.rs
+index fcc4290..e93105d 100644
+--- a/crates/openfang-kernel/src/kernel.rs
++++ b/crates/openfang-kernel/src/kernel.rs
+@@ -14,7 +14,9 @@ use crate::triggers::{TriggerEngine, TriggerId, TriggerPattern};
+ use crate::workflow::{StepAgent, Workflow, WorkflowEngine, WorkflowId, WorkflowRunId};
+ 
+ use openfang_memory::MemorySubstrate;
+-use openfang_runtime::agent_loop::{run_agent_loop, run_agent_loop_streaming, AgentLoopResult};
++use openfang_runtime::agent_loop::{
++    run_agent_loop, run_agent_loop_streaming, strip_provider_prefix, AgentLoopResult,
++};
+ use openfang_runtime::audit::AuditLog;
+ use openfang_runtime::drivers;
+ use openfang_runtime::kernel_handle::{self, KernelHandle};
+@@ -483,6 +485,11 @@ impl OpenFangKernel {
+     pub fn boot_with_config(mut config: KernelConfig) -> KernelResult<Self> {
+         use openfang_types::config::KernelMode;
+ 
++        // Env var overrides 鈥?useful for Docker where config.toml is baked in.
++        if let Ok(listen) = std::env::var("OPENFANG_LISTEN") {
++            config.api_listen = listen;
++        }
++
+         // Clamp configuration bounds to prevent zero-value or unbounded misconfigs
+         config.clamp_bounds();
+ 
+@@ -598,6 +605,9 @@ impl OpenFangKernel {
+                 config.provider_urls.len()
+             );
+         }
++        // Load user's custom models from ~/.openfang/custom_models.json
++        let custom_models_path = config.home_dir.join("custom_models.json");
++        model_catalog.load_custom_models(&custom_models_path);
+         let available_count = model_catalog.available_models().len();
+         let total_count = model_catalog.list_models().len();
+         let local_count = model_catalog
+@@ -1890,7 +1900,7 @@ impl OpenFangKernel {
+             router.resolve_aliases(&self.model_catalog.read().unwrap_or_else(|e| e.into_inner()));
+             // Build a probe request to score complexity
+             let probe = CompletionRequest {
+-                model: manifest.model.model.clone(),
++                model: strip_provider_prefix(&manifest.model.model, &manifest.model.provider),
+                 messages: vec![openfang_types::message::Message::user(message)],
+                 tools: tools.clone(),
+                 max_tokens: manifest.model.max_tokens,
+diff --git a/crates/openfang-runtime/src/agent_loop.rs b/crates/openfang-runtime/src/agent_loop.rs
+index 5af47c5..3372309 100644
+--- a/crates/openfang-runtime/src/agent_loop.rs
++++ b/crates/openfang-runtime/src/agent_loop.rs
+@@ -51,6 +51,20 @@ const MAX_CONTINUATIONS: u32 = 5;
+ /// Maximum message history size before auto-trimming to prevent context overflow.
+ const MAX_HISTORY_MESSAGES: usize = 20;
+ 
++/// Strip a provider prefix from a model ID before sending to the API.
++///
++/// Many models are stored as `provider/org/model` (e.g. `openrouter/google/gemini-2.5-flash`)
++/// but the upstream API expects just `org/model`. This also handles special routers
++/// like `openrouter/auto` 鈫?`auto`.
++pub fn strip_provider_prefix(model: &str, provider: &str) -> String {
++    let prefix = format!("{}/", provider);
++    if model.starts_with(&prefix) {
++        model[prefix.len()..].to_string()
++    } else {
++        model.to_string()
++    }
++}
++
+ /// Default context window size (tokens) for token-based trimming.
+ const DEFAULT_CONTEXT_WINDOW: usize = 200_000;
+ 
+@@ -281,8 +295,11 @@ pub async fn run_agent_loop(
+         // Context guard: compact oversized tool results before LLM call
+         apply_context_guard(&mut messages, &context_budget, available_tools);
+ 
++        // Strip provider prefix: "openrouter/google/gemini-2.5-flash" 鈫?"google/gemini-2.5-flash"
++        let api_model = strip_provider_prefix(&manifest.model.model, &manifest.model.provider);
++
+         let request = CompletionRequest {
+-            model: manifest.model.model.clone(),
++            model: api_model,
+             messages: messages.clone(),
+             tools: available_tools.to_vec(),
+             max_tokens: manifest.model.max_tokens,
+@@ -1186,8 +1203,11 @@ pub async fn run_agent_loop_streaming(
+         // Context guard: compact oversized tool results before LLM call
+         apply_context_guard(&mut messages, &context_budget, available_tools);
+ 
++        // Strip provider prefix: "openrouter/google/gemini-2.5-flash" 鈫?"google/gemini-2.5-flash"
++        let api_model = strip_provider_prefix(&manifest.model.model, &manifest.model.provider);
++
+         let request = CompletionRequest {
+-            model: manifest.model.model.clone(),
++            model: api_model,
+             messages: messages.clone(),
+             tools: available_tools.to_vec(),
+             max_tokens: manifest.model.max_tokens,
+diff --git a/crates/openfang-runtime/src/model_catalog.rs b/crates/openfang-runtime/src/model_catalog.rs
+index 10498d8..3242644 100644
+--- a/crates/openfang-runtime/src/model_catalog.rs
++++ b/crates/openfang-runtime/src/model_catalog.rs
+@@ -214,6 +214,73 @@ impl ModelCatalog {
+             }
+         }
+     }
++
++    /// Add a custom model at runtime.
++    ///
++    /// Returns `true` if the model was added, `false` if a model with that ID
++    /// already exists (case-insensitive).
++    pub fn add_custom_model(&mut self, entry: ModelCatalogEntry) -> bool {
++        let lower = entry.id.to_lowercase();
++        if self.models.iter().any(|m| m.id.to_lowercase() == lower) {
++            return false;
++        }
++        let provider = entry.provider.clone();
++        self.models.push(entry);
++
++        // Update provider model count
++        if let Some(p) = self.providers.iter_mut().find(|p| p.id == provider) {
++            p.model_count = self
++                .models
++                .iter()
++                .filter(|m| m.provider == provider)
++                .count();
++        }
++        true
++    }
++
++    /// Remove a custom model by ID.
++    ///
++    /// Only removes models with `Custom` tier to prevent accidental deletion
++    /// of builtin models. Returns `true` if removed.
++    pub fn remove_custom_model(&mut self, model_id: &str) -> bool {
++        let lower = model_id.to_lowercase();
++        let before = self.models.len();
++        self.models
++            .retain(|m| !(m.id.to_lowercase() == lower && m.tier == ModelTier::Custom));
++        self.models.len() < before
++    }
++
++    /// Load custom models from a JSON file.
++    ///
++    /// Merges them into the catalog. Skips models that already exist.
++    pub fn load_custom_models(&mut self, path: &std::path::Path) {
++        if !path.exists() {
++            return;
++        }
++        let Ok(data) = std::fs::read_to_string(path) else {
++            return;
++        };
++        let Ok(entries) = serde_json::from_str::<Vec<ModelCatalogEntry>>(&data) else {
++            return;
++        };
++        for entry in entries {
++            self.add_custom_model(entry);
++        }
++    }
++
++    /// Save all custom-tier models to a JSON file.
++    pub fn save_custom_models(&self, path: &std::path::Path) -> Result<(), String> {
++        let custom: Vec<&ModelCatalogEntry> = self
++            .models
++            .iter()
++            .filter(|m| m.tier == ModelTier::Custom)
++            .collect();
++        let json = serde_json::to_string_pretty(&custom)
++            .map_err(|e| format!("Failed to serialize custom models: {e}"))?;
++        std::fs::write(path, json)
++            .map_err(|e| format!("Failed to write custom models file: {e}"))?;
++        Ok(())
++    }
+ }
+ 
+ impl Default for ModelCatalog {
+@@ -1301,7 +1368,7 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
+             aliases: vec![],
+         },
+         // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲
+-        // OpenRouter (5)
++        // OpenRouter (11)
+         // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲
+         ModelCatalogEntry {
+             id: "openrouter/auto".into(),
+@@ -1373,6 +1440,76 @@ fn builtin_models() -> Vec<ModelCatalogEntry> {
+             supports_streaming: true,
+             aliases: vec![],
+         },
++        ModelCatalogEntry {
++            id: "openrouter/meta-llama/llama-3.3-70b-instruct".into(),
++            display_name: "Llama 3.3 70B (OpenRouter, free)".into(),
++            provider: "openrouter".into(),
++            tier: ModelTier::Balanced,
++            context_window: 128_000,
++            max_output_tokens: 32_768,
++            input_cost_per_m: 0.0,
++            output_cost_per_m: 0.0,
++            supports_tools: true,
++            supports_vision: false,
++            supports_streaming: true,
++            aliases: vec![],
++        },
++        ModelCatalogEntry {
++            id: "openrouter/mistralai/mistral-7b-instruct".into(),
++            display_name: "Mistral 7B (OpenRouter, free)".into(),
++            provider: "openrouter".into(),
++            tier: ModelTier::Fast,
++            context_window: 32_768,
++            max_output_tokens: 8_192,
++            input_cost_per_m: 0.0,
++            output_cost_per_m: 0.0,
++            supports_tools: false,
++            supports_vision: false,
++            supports_streaming: true,
++            aliases: vec![],
++        },
++        ModelCatalogEntry {
++            id: "openrouter/google/gemma-2-9b-it".into(),
++            display_name: "Gemma 2 9B (OpenRouter, free)".into(),
++            provider: "openrouter".into(),
++            tier: ModelTier::Fast,
++            context_window: 8_192,
++            max_output_tokens: 4_096,
++            input_cost_per_m: 0.0,
++            output_cost_per_m: 0.0,
++            supports_tools: false,
++            supports_vision: false,
++            supports_streaming: true,
++            aliases: vec![],
++        },
++        ModelCatalogEntry {
++            id: "openrouter/qwen/qwen-2.5-72b-instruct".into(),
++            display_name: "Qwen 2.5 72B (OpenRouter, free)".into(),
++            provider: "openrouter".into(),
++            tier: ModelTier::Balanced,
++            context_window: 128_000,
++            max_output_tokens: 32_768,
++            input_cost_per_m: 0.0,
++            output_cost_per_m: 0.0,
++            supports_tools: true,
++            supports_vision: false,
++            supports_streaming: true,
++            aliases: vec![],
++        },
++        ModelCatalogEntry {
++            id: "openrouter/deepseek/deepseek-chat-v3-0324".into(),
++            display_name: "DeepSeek V3 0324 (OpenRouter)".into(),
++            provider: "openrouter".into(),
++            tier: ModelTier::Smart,
++            context_window: 128_000,
++            max_output_tokens: 32_768,
++            input_cost_per_m: 0.14,
++            output_cost_per_m: 0.28,
++            supports_tools: true,
++            supports_vision: false,
++            supports_streaming: true,
++            aliases: vec![],
++        },
+         // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲
+         // Mistral (6)
+         // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲
+diff --git a/crates/openfang-types/src/approval.rs b/crates/openfang-types/src/approval.rs
+index 96c5c5c..a53dd45 100644
+--- a/crates/openfang-types/src/approval.rs
++++ b/crates/openfang-types/src/approval.rs
+@@ -167,11 +167,19 @@ pub struct ApprovalResponse {
+ #[serde(default)]
+ pub struct ApprovalPolicy {
+     /// Tools that always require approval. Default: `["shell_exec"]`.
++    ///
++    /// Accepts either a list of tool names or a boolean shorthand:
++    /// - `require_approval = false` 鈫?empty list (no tools require approval)
++    /// - `require_approval = true`  鈫?`["shell_exec"]` (the default set)
++    #[serde(deserialize_with = "deserialize_require_approval")]
+     pub require_approval: Vec<String>,
+     /// Timeout in seconds. Default: 60, range: 10..=300.
+     pub timeout_secs: u64,
+     /// Auto-approve in autonomous mode. Default: `false`.
+     pub auto_approve_autonomous: bool,
++    /// Alias: if `auto_approve = true`, clears the require list at boot.
++    #[serde(default, alias = "auto_approve")]
++    pub auto_approve: bool,
+ }
+ 
+ impl Default for ApprovalPolicy {
+@@ -180,11 +188,57 @@ impl Default for ApprovalPolicy {
+             require_approval: vec!["shell_exec".to_string()],
+             timeout_secs: 60,
+             auto_approve_autonomous: false,
++            auto_approve: false,
++        }
++    }
++}
++
++/// Custom deserializer that accepts:
++/// - A list of strings: `["shell_exec", "file_write"]`
++/// - A boolean: `false` 鈫?`[]`, `true` 鈫?`["shell_exec"]`
++fn deserialize_require_approval<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
++where
++    D: serde::Deserializer<'de>,
++{
++    use serde::de;
++
++    struct RequireApprovalVisitor;
++
++    impl<'de> de::Visitor<'de> for RequireApprovalVisitor {
++        type Value = Vec<String>;
++
++        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
++            f.write_str("a list of tool names or a boolean")
++        }
++
++        fn visit_bool<E: de::Error>(self, v: bool) -> Result<Self::Value, E> {
++            Ok(if v {
++                vec!["shell_exec".to_string()]
++            } else {
++                vec![]
++            })
++        }
++
++        fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
++            let mut v = Vec::new();
++            while let Some(s) = seq.next_element::<String>()? {
++                v.push(s);
++            }
++            Ok(v)
+         }
+     }
++
++    deserializer.deserialize_any(RequireApprovalVisitor)
+ }
+ 
+ impl ApprovalPolicy {
++    /// Apply the `auto_approve` shorthand: if true, clears the require list.
++    pub fn apply_shorthands(&mut self) {
++        if self.auto_approve {
++            self.require_approval.clear();
++        }
++    }
++
+     /// Validate this policy's fields.
+     ///
+     /// Returns `Ok(())` or an error message describing the first validation failure.
+@@ -485,6 +539,7 @@ mod tests {
+         assert_eq!(policy.require_approval, vec!["shell_exec".to_string()]);
+         assert_eq!(policy.timeout_secs, 60);
+         assert!(!policy.auto_approve_autonomous);
++        assert!(!policy.auto_approve);
+     }
+ 
+     #[test]
+@@ -496,6 +551,31 @@ mod tests {
+         assert!(!policy.auto_approve_autonomous);
+     }
+ 
++    #[test]
++    fn policy_require_approval_bool_false() {
++        // require_approval = false 鈫?empty list
++        let policy: ApprovalPolicy =
++            serde_json::from_str(r#"{"require_approval": false}"#).unwrap();
++        assert!(policy.require_approval.is_empty());
++    }
++
++    #[test]
++    fn policy_require_approval_bool_true() {
++        // require_approval = true 鈫?["shell_exec"]
++        let policy: ApprovalPolicy =
++            serde_json::from_str(r#"{"require_approval": true}"#).unwrap();
++        assert_eq!(policy.require_approval, vec!["shell_exec"]);
++    }
++
++    #[test]
++    fn policy_auto_approve_clears_list() {
++        let mut policy = ApprovalPolicy::default();
++        assert!(!policy.require_approval.is_empty());
++        policy.auto_approve = true;
++        policy.apply_shorthands();
++        assert!(policy.require_approval.is_empty());
++    }
++
+     // -----------------------------------------------------------------------
+     // ApprovalPolicy 鈥?timeout_secs
+     // -----------------------------------------------------------------------
+@@ -608,6 +688,7 @@ mod tests {
+             require_approval: vec!["shell_exec".into(), "file_delete".into()],
+             timeout_secs: 120,
+             auto_approve_autonomous: true,
++            auto_approve: false,
+         };
+         let json = serde_json::to_string(&policy).unwrap();
+         let back: ApprovalPolicy = serde_json::from_str(&json).unwrap();
+diff --git a/crates/openfang-types/src/model_catalog.rs b/crates/openfang-types/src/model_catalog.rs
+index 27029de..4e48a4d 100644
+--- a/crates/openfang-types/src/model_catalog.rs
++++ b/crates/openfang-types/src/model_catalog.rs
+@@ -58,6 +58,8 @@ pub enum ModelTier {
+     Fast,
+     /// Local models (Ollama, vLLM, LM Studio).
+     Local,
++    /// User-defined custom models added at runtime.
++    Custom,
+ }
+ 
+ impl fmt::Display for ModelTier {
+@@ -68,6 +70,7 @@ impl fmt::Display for ModelTier {
+             ModelTier::Balanced => write!(f, "balanced"),
+             ModelTier::Fast => write!(f, "fast"),
+             ModelTier::Local => write!(f, "local"),
++            ModelTier::Custom => write!(f, "custom"),
+         }
+     }
+ }
+@@ -188,6 +191,7 @@ mod tests {
+         assert_eq!(ModelTier::Balanced.to_string(), "balanced");
+         assert_eq!(ModelTier::Fast.to_string(), "fast");
+         assert_eq!(ModelTier::Local.to_string(), "local");
++        assert_eq!(ModelTier::Custom.to_string(), "custom");
+     }
+ 
+     #[test]
