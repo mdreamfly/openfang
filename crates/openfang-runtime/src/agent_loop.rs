@@ -57,9 +57,12 @@ const MAX_HISTORY_MESSAGES: usize = 20;
 /// but the upstream API expects just `org/model`. This also handles special routers
 /// like `openrouter/auto` → `auto`.
 pub fn strip_provider_prefix(model: &str, provider: &str) -> String {
-    let prefix = format!("{}/", provider);
-    if model.starts_with(&prefix) {
-        model[prefix.len()..].to_string()
+    let slash_prefix = format!("{}/", provider);
+    let colon_prefix = format!("{}:", provider);
+    if model.starts_with(&slash_prefix) {
+        model[slash_prefix.len()..].to_string()
+    } else if model.starts_with(&colon_prefix) {
+        model[colon_prefix.len()..].to_string()
     } else {
         model.to_string()
     }
@@ -553,6 +556,7 @@ pub async fn run_agent_loop(
                             warn!(tool = %tool_call.name, "Tool call blocked by loop guard");
                             tool_result_blocks.push(ContentBlock::ToolResult {
                                 tool_use_id: tool_call.id.clone(),
+                                tool_name: tool_call.name.clone(),
                                 content: msg.clone(),
                                 is_error: true,
                             });
@@ -590,6 +594,7 @@ pub async fn run_agent_loop(
                         if let Err(reason) = hook_reg.fire(&ctx) {
                             tool_result_blocks.push(ContentBlock::ToolResult {
                                 tool_use_id: tool_call.id.clone(),
+                                tool_name: tool_call.name.clone(),
                                 content: format!(
                                     "Hook blocked tool '{}': {}",
                                     tool_call.name, reason
@@ -673,6 +678,7 @@ pub async fn run_agent_loop(
 
                     tool_result_blocks.push(ContentBlock::ToolResult {
                         tool_use_id: result.tool_use_id,
+                        tool_name: tool_call.name.clone(),
                         content: final_content,
                         is_error: result.is_error,
                     });
@@ -1459,6 +1465,7 @@ pub async fn run_agent_loop_streaming(
                             warn!(tool = %tool_call.name, "Tool call blocked by loop guard (streaming)");
                             tool_result_blocks.push(ContentBlock::ToolResult {
                                 tool_use_id: tool_call.id.clone(),
+                                tool_name: tool_call.name.clone(),
                                 content: msg.clone(),
                                 is_error: true,
                             });
@@ -1496,6 +1503,7 @@ pub async fn run_agent_loop_streaming(
                         if let Err(reason) = hook_reg.fire(&ctx) {
                             tool_result_blocks.push(ContentBlock::ToolResult {
                                 tool_use_id: tool_call.id.clone(),
+                                tool_name: tool_call.name.clone(),
                                 content: format!(
                                     "Hook blocked tool '{}': {}",
                                     tool_call.name, reason
@@ -1593,6 +1601,7 @@ pub async fn run_agent_loop_streaming(
 
                     tool_result_blocks.push(ContentBlock::ToolResult {
                         tool_use_id: result.tool_use_id,
+                        tool_name: tool_call.name.clone(),
                         content: final_content,
                         is_error: result.is_error,
                     });

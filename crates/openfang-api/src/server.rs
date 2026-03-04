@@ -49,6 +49,7 @@ pub async fn build_router(
         bridge_manager: tokio::sync::Mutex::new(bridge),
         channels_config: tokio::sync::RwLock::new(channels_config),
         shutdown_notify: Arc::new(tokio::sync::Notify::new()),
+        clawhub_cache: dashmap::DashMap::new(),
     });
 
     // CORS: allow localhost origins by default. If API key is set, the API
@@ -157,6 +158,10 @@ pub async fn build_router(
             axum::routing::post(routes::reset_session),
         )
         .route(
+            "/api/agents/{id}/history",
+            axum::routing::delete(routes::clear_agent_history),
+        )
+        .route(
             "/api/agents/{id}/session/compact",
             axum::routing::post(routes::compact_session),
         )
@@ -167,6 +172,10 @@ pub async fn build_router(
         .route(
             "/api/agents/{id}/model",
             axum::routing::put(routes::set_model),
+        )
+        .route(
+            "/api/agents/{id}/tools",
+            axum::routing::get(routes::get_agent_tools).put(routes::set_agent_tools),
         )
         .route(
             "/api/agents/{id}/skills",
@@ -313,11 +322,19 @@ pub async fn build_router(
             axum::routing::get(routes::clawhub_skill_detail),
         )
         .route(
+            "/api/clawhub/skill/{slug}/code",
+            axum::routing::get(routes::clawhub_skill_code),
+        )
+        .route(
             "/api/clawhub/install",
             axum::routing::post(routes::clawhub_install),
         )
         // Hands endpoints
         .route("/api/hands", axum::routing::get(routes::list_hands))
+        .route(
+            "/api/hands/install",
+            axum::routing::post(routes::install_hand),
+        )
         .route(
             "/api/hands/active",
             axum::routing::get(routes::list_active_hands),
@@ -334,6 +351,11 @@ pub async fn build_router(
         .route(
             "/api/hands/{hand_id}/install-deps",
             axum::routing::post(routes::install_hand_deps),
+        )
+        .route(
+            "/api/hands/{hand_id}/settings",
+            axum::routing::get(routes::get_hand_settings)
+                .put(routes::update_hand_settings),
         )
         .route(
             "/api/hands/instances/{id}/pause",
@@ -376,6 +398,27 @@ pub async fn build_router(
         .route(
             "/api/network/status",
             axum::routing::get(routes::network_status),
+        )
+        // Agent communication (Comms) endpoints
+        .route(
+            "/api/comms/topology",
+            axum::routing::get(routes::comms_topology),
+        )
+        .route(
+            "/api/comms/events",
+            axum::routing::get(routes::comms_events),
+        )
+        .route(
+            "/api/comms/events/stream",
+            axum::routing::get(routes::comms_events_stream),
+        )
+        .route(
+            "/api/comms/send",
+            axum::routing::post(routes::comms_send),
+        )
+        .route(
+            "/api/comms/task",
+            axum::routing::post(routes::comms_task),
         )
         // Tools endpoint
         .route("/api/tools", axum::routing::get(routes::list_tools))
@@ -421,7 +464,8 @@ pub async fn build_router(
         )
         .route(
             "/api/budget/agents/{id}",
-            axum::routing::get(routes::agent_budget_status),
+            axum::routing::get(routes::agent_budget_status)
+                .put(routes::update_agent_budget),
         )
         // Session endpoints
         .route("/api/sessions", axum::routing::get(routes::list_sessions))
