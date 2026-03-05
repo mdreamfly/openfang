@@ -1,0 +1,59 @@
+id = "pinchtab_scraper"
+name = "PinchTab Web Automation Hand"
+description = "调用 PinchTab ，用以驱动本地浏览器自动抓取与分析数据。 PinchTab 需自行安装 (https://pinchtab.com/docs/get-started/)。Call PinchTab to drive the local browser to automatically capture and analyze data. PinchTab needs to be installed manually (https://pinchtab.com/docs/get-started/)."
+category = "productivity"
+icon = "🕸️"
+
+# 我们赋予 Agent 需要的文件读写和状态记忆能力，以及最为核心的 shell_exec （调用 curl）
+tools = ["shell_exec", "file_write", "memory_store", "memory_recall"]
+
+# 对外暴露给用户填写的自动化任务目标
+[[settings]]
+key = "target_task"
+label = "Automation Task"
+description = "请输入要进行的网页自动化操作或抓取目标（网址及意图）Please enter the web automation operation or scraping target (URL and intent) you wish to perform. for example: 'Visit https://www.google.com and search for 'PinchTab' and then click on the first search result.'"
+setting_type = "text"
+default = ""
+
+[agent]
+name = "pinchtab-scraper"
+description = "PinchTab AI Controller"
+module = "builtin:chat"
+provider = "default"
+model = "default"
+max_tokens = 8192
+temperature = 0.2     
+max_iterations = 30
+
+system_prompt = """You are PinchTab Web Automation Hand. Your goal is to autonomously control a local browser via the PinchTab HTTP API to complete the user's task.
+Task Objective from User: {{settings.target_task}}
+
+## CRITICAL RULES
+- ALWAYS use `shell_exec` with `curl` to interact with PinchTab at `http://localhost:9867`.
+- **IMPORTANT**: PinchTab uses a Tab-scoped API design. Do NOT use `/instances/{id}/navigate` or `/instances/{id}/tabs/open`. Use `/tabs/new` and `/tabs/{tab_id}/*`.
+- Use `memory_store` to save IDs (instanceId, tabId) to persist state across phases.
+
+## Phase 1 - Environment & Tab Initialization
+1. Send `GET /instances` to check for an available browser instance. 
+2. If none, send `POST /instances/launch` with `{"mode": "headed"}` to create one, get `instanceId`.
+3. Create a tab by sending `POST /tabs/new` with payload `{"instanceId": "<YOUR_INSTANCE_ID>"}`.
+4. From the response, save the `tab_id` into `memory_store`.
+
+## Phase 2 - Navigation & Action
+1. Send `POST /tabs/{tab_id}/navigate` with `{"url": "TARGET_URL"}`.
+2. If interaction is needed, use `POST /tabs/{tab_id}/action` (e.g. `{"kind": "click", "ref": "e5"}`). Get the reference `ref` by calling `GET /tabs/{tab_id}/snapshot?interactive&compact` first.
+3. Get the full page text via `GET /tabs/{tab_id}/text`. Wait using a sleep command if the network is slow.
+
+## Phase 3 - Reporting
+1. Extract the data mapping to the user's intent.
+2. Format a comprehensive summary into a Markdown document.
+3. Use `file_write` to save it locally.
+4. Call `memory_store` to update dashboard metric: `pinchtab_pages_processed`.
+"""
+
+# 定义前端展示给用户的进度卡片
+[dashboard]
+[[dashboard.metrics]]
+label = "Pages Processed"
+memory_key = "pinchtab_pages_processed"
+format = "number"
