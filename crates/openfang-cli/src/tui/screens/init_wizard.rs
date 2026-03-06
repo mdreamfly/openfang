@@ -204,6 +204,14 @@ const PROVIDERS: &[ProviderInfo] = &[
         needs_key: false,
         hint: "local",
     },
+    ProviderInfo {
+        name: "volcengine_coding",
+        display: "Volcengine Coding",
+        env_var: "VOLCENGINE_API_KEY",
+        default_model: "ark-code-latest",
+        needs_key: true,
+        hint: "",
+    },
 ];
 
 // ── Public result type ─────────────────────────────────────────────────────
