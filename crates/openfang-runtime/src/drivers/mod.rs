@@ -175,9 +175,14 @@ fn provider_defaults(provider: &str) -> Option<ProviderDefaults> {
             api_key_env: "ZHIPU_API_KEY",
             key_required: true,
         }),
-        "volcengine_coding" => Some(ProviderDefaults {
-            base_url: VOLCENGINE_CODING_BASE_URL,
-            api_key_env: "VOLCENGINE_API_KEY",
+         "zai" => Some(ProviderDefaults {
+            base_url: ZAI_BASE_URL,
+            api_key_env: "ZHIPU_API_KEY",
+            key_required: true,
+        }),
+        "zai_coding" => Some(ProviderDefaults {
+            base_url: ZAI_CODING_BASE_URL,
+            api_key_env: "ZHIPU_API_KEY",
             key_required: true,
         }),
         "qianfan" | "baidu" => Some(ProviderDefaults {
